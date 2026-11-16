@@ -70,7 +70,12 @@ jobs:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
-          KERNEL_ID="$KAGGLE_USERNAME/studio-almasawa-wan-run"
+          KERNEL_ID="$(python -c 'import json; print(json.load(open("kaggle/wan-run/kernel-metadata.json", encoding="utf-8"))["id"])')"
+          case "$KERNEL_ID" in
+            "$KAGGLE_USERNAME/"*) ;;
+            *) echo "::error::Kernel metadata owner does not match KAGGLE_USERNAME"; exit 1 ;;
+          esac
+          echo "Waiting for Kaggle kernel: $KERNEL_ID"
           mkdir -p output
           completed=0
           for attempt in $(seq 1 80); do
@@ -82,6 +87,10 @@ jobs:
             fi
             if echo "$status" | grep -Eqi 'ERROR|CANCEL'; then
               echo "::error::Kaggle notebook ended unsuccessfully: $status"
+              exit 1
+            fi
+            if echo "$status" | grep -Eqi 'Permission .* denied|Cannot access kernel'; then
+              echo "::error::Kaggle cannot access the exact kernel ID from kernel-metadata.json. Verify notebook ownership and Kaggle API-token permissions."
               exit 1
             fi
             sleep 30
