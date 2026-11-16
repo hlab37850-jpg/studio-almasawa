@@ -63,7 +63,7 @@ jobs:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
-          kaggle kernels push -p kaggle/wan-run --accelerator NvidiaTeslaT4
+          kaggle kernels push -p kaggle/wan-run
 
       - name: Wait for Kaggle generation
         env:
