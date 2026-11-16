@@ -40,7 +40,7 @@ if not found:
 NOTEBOOK.write_text(json.dumps(notebook, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 metadata = {
     "id": f"{args.username}/studio-almasawa-wan-run",
-    "title": "Studio Almasawa - Wan Video Generation",
+    "title": "Studio Almasawa Wan Run",
     "code_file": "wan_video.ipynb",
     "language": "python",
     "kernel_type": "notebook",
