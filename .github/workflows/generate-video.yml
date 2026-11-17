@@ -35,7 +35,7 @@ jobs:
           ref: feature/arabic-video-pipeline
       - name: Validate Kaggle credentials
         env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_USERNAME: hlabal
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
           test -n "$KAGGLE_USERNAME" || { echo "::error::Missing KAGGLE_USERNAME"; exit 1; }
@@ -47,7 +47,7 @@ jobs:
           sudo apt-get install -y ffmpeg
       - name: Prepare exact Kaggle kernel
         env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_USERNAME: hlabal
           VIDEO_PROMPT: ${{ inputs.prompt || 'Vertical cinematic 9:16 video of a premium modern Arabic creative studio, designer arranging abstract brand shapes on a screen, smooth camera movement, deep navy with blue and violet highlights, realistic professional scene, no text, no letters, no watermark, no logos.' }}
           ASPECT_RATIO: ${{ inputs.aspect_ratio || '9:16' }}
         run: |
@@ -55,12 +55,12 @@ jobs:
           python -c 'import json; print("KERNEL_ID="+json.load(open("kaggle/wan-run/kernel-metadata.json"))["id"])'
       - name: Submit Wan 2.1 generation
         env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_USERNAME: hlabal
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: kaggle kernels push -p kaggle/wan-run
       - name: Wait for Kaggle and download generated scene
         env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_USERNAME: hlabal
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
           KERNEL_ID="$(python -c 'import json; print(json.load(open("kaggle/wan-run/kernel-metadata.json"))["id"])')"
