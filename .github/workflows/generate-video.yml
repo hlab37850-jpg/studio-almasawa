@@ -105,8 +105,6 @@ jobs:
 
       - name: Verify MP4 with ffprobe
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
           ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,width,height -of json output/final.mp4 | tee output/ffprobe.json
           python - <<'PY'
           import json
