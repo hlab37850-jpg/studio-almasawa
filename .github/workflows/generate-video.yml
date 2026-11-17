@@ -76,10 +76,27 @@ jobs:
             if [ "$attempt" -eq 80 ]; then echo "::error::Kaggle timed out."; exit 1; fi
             sleep 30
           done
-          kaggle kernels output "$KERNEL_ID" -p output --force
-          test -s output/final.mp4
-          test -s output/generation-report.json
+          kaggle kernels output "$KERNEL_ID" -p output --force || true
+          echo "===== KAGGLE OUTPUT FILES ====="
+          find output -maxdepth 2 -type f -printf '%p (%s bytes)\\n' || true
+          if [ ! -s output/final.mp4 ] || [ ! -s output/generation-report.json ]; then
+            echo "::error::Kaggle completed without the expected MP4/report. Printing kernel logs."
+            for log in output/*.log; do
+              [ -f "$log" ] || continue
+              echo "===== $log ====="
+              tail -n 250 "$log"
+            done
+            exit 1
+          fi
           mv output/final.mp4 output/generated-scene.mp4
+      - name: Upload Kaggle diagnostics on failure
+        if: failure() && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-almasawa-kaggle-diagnostics
+          path: output/
+          if-no-files-found: warn
+          retention-days: 3
       - name: Add Arabic narration and caption file
         run: |
           cat > output/narration.txt <<'EOF'
