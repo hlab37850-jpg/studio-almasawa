@@ -1,126 +1,124 @@
 name: Generate AI Video (Kaggle GPU)
-
 on:
   workflow_dispatch:
     inputs:
       prompt:
-        description: "English visual prompt for the generated scene"
+        description: "Visual prompt for today's Studio Almasawa video"
         required: true
         type: string
-        default: "A cinematic vertical video about an Arabic creative studio using artificial intelligence: elegant modern workspace, a developer creating digital visuals, realistic camera movement, premium lighting, no text, no letters, no watermark, no logos."
+        default: "Vertical cinematic 9:16 video of a premium modern Arabic creative studio, designer arranging abstract brand shapes on a screen, smooth camera movement, deep navy with blue and violet highlights, realistic professional scene, no text, no letters, no watermark, no logos."
       aspect_ratio:
         description: "Output aspect ratio"
         required: true
         type: choice
-        options:
-          - "9:16"
-          - "16:9"
+        options: ["9:16", "16:9"]
         default: "9:16"
-
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/generate-video.yml"
+      - "scripts/prepare_kaggle_kernel.py"
+      - "kaggle/wan-run/wan_video.ipynb"
 permissions:
   contents: read
-
 concurrency:
   group: kaggle-ai-video
   cancel-in-progress: false
-
 jobs:
   generate:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
-      - name: Checkout development branch
+      - name: Checkout upgraded pipeline
         uses: actions/checkout@v4
         with:
           ref: feature/arabic-video-pipeline
-
       - name: Validate Kaggle credentials
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
-          if [ -z "$KAGGLE_USERNAME" ] || [ -z "$KAGGLE_API_TOKEN" ]; then
-            echo "::error::Add KAGGLE_USERNAME and KAGGLE_API_TOKEN in Repository Settings > Secrets and variables > Actions. Do not commit credentials."
-            exit 1
-          fi
-
-      - name: Install Kaggle CLI
-        run: python -m pip install --upgrade kaggle
-
-      - name: Prepare private GPU notebook
+          test -n "$KAGGLE_USERNAME" || { echo "::error::Missing KAGGLE_USERNAME"; exit 1; }
+          test -n "$KAGGLE_API_TOKEN" || { echo "::error::Missing KAGGLE_API_TOKEN"; exit 1; }
+      - name: Install tools
+        run: |
+          python -m pip install --upgrade kaggle edge-tts
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Prepare exact Kaggle kernel
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          VIDEO_PROMPT: ${{ inputs.prompt }}
-          ASPECT_RATIO: ${{ inputs.aspect_ratio }}
+          VIDEO_PROMPT: ${{ inputs.prompt || 'Vertical cinematic 9:16 video of a premium modern Arabic creative studio, designer arranging abstract brand shapes on a screen, smooth camera movement, deep navy with blue and violet highlights, realistic professional scene, no text, no letters, no watermark, no logos.' }}
+          ASPECT_RATIO: ${{ inputs.aspect_ratio || '9:16' }}
         run: |
-          python scripts/prepare_kaggle_kernel.py \
-            --username "$KAGGLE_USERNAME" \
-            --prompt "$VIDEO_PROMPT" \
-            --aspect-ratio "$ASPECT_RATIO"
-
-      - name: Submit generation to Kaggle GPU
+          python scripts/prepare_kaggle_kernel.py --username "$KAGGLE_USERNAME" --prompt "$VIDEO_PROMPT" --aspect-ratio "$ASPECT_RATIO"
+          python -c 'import json; print("KERNEL_ID="+json.load(open("kaggle/wan-run/kernel-metadata.json"))["id"])'
+      - name: Submit Wan 2.1 generation
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: kaggle kernels push -p kaggle/wan-run
+      - name: Wait for Kaggle and download generated scene
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
-          kaggle kernels push -p kaggle/wan-run
-
-      - name: Wait for Kaggle generation
-        env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-        run: |
-          KERNEL_ID="$(python -c 'import json; print(json.load(open("kaggle/wan-run/kernel-metadata.json", encoding="utf-8"))["id"])')"
-          case "$KERNEL_ID" in
-            "$KAGGLE_USERNAME/"*) ;;
-            *) echo "::error::Kernel metadata owner does not match KAGGLE_USERNAME"; exit 1 ;;
-          esac
-          echo "Waiting for Kaggle kernel: $KERNEL_ID"
+          KERNEL_ID="$(python -c 'import json; print(json.load(open("kaggle/wan-run/kernel-metadata.json"))["id"])')"
           mkdir -p output
-          completed=0
           for attempt in $(seq 1 80); do
             status="$(kaggle kernels status "$KERNEL_ID" 2>&1 || true)"
-            echo "Kaggle status check $attempt: $status"
-            if echo "$status" | grep -Eqi 'COMPLETE'; then
-              completed=1
-              break
-            fi
-            if echo "$status" | grep -Eqi 'ERROR|CANCEL'; then
-              echo "::error::Kaggle notebook ended unsuccessfully: $status"
-              exit 1
-            fi
+            echo "Kaggle status $attempt: $status"
+            if echo "$status" | grep -Eqi 'COMPLETE'; then break; fi
+            if echo "$status" | grep -Eqi 'ERROR|CANCEL'; then echo "::error::Kaggle failed: $status"; exit 1; fi
             if echo "$status" | grep -Eqi 'Permission .* denied|Cannot access kernel'; then
-              echo "::error::Kaggle cannot access the exact kernel ID from kernel-metadata.json. Verify notebook ownership and Kaggle API-token permissions."
-              exit 1
+              echo "::error::Kaggle denied access to $KERNEL_ID; check account ownership/API permissions."; exit 1
             fi
+            if [ "$attempt" -eq 80 ]; then echo "::error::Kaggle timed out."; exit 1; fi
             sleep 30
           done
-          if [ "$completed" -ne 1 ]; then
-            echo "::error::Timed out waiting for Kaggle. Check the private notebook in your Kaggle account."
-            exit 1
-          fi
           kaggle kernels output "$KERNEL_ID" -p output --force
           test -s output/final.mp4
           test -s output/generation-report.json
-
-      - name: Verify MP4 with ffprobe
+          mv output/final.mp4 output/generated-scene.mp4
+      - name: Add Arabic narration and caption file
         run: |
-          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,width,height -of json output/final.mp4 | tee output/ffprobe.json
+          cat > output/narration.txt <<'EOF'
+          من فكرةٍ بسيطة، نصنع مشهداً بصرياً بالذكاء الاصطناعي، ونحوّله إلى فيديو عربي يحمل هوية استوديو المساوى. نصنع هوية... تترك أثراً.
+          EOF
+          edge-tts --voice ar-YE-SalehNeural --text "$(cat output/narration.txt)" --write-media output/voice.mp3
+          DURATION="$(ffprobe -v error -show_entries format=duration -of csv=p=0 output/voice.mp3)"
+          python - "$DURATION" <<'PY'
+          import sys
+          d=float(sys.argv[1]); whole=int(d); ms=int(round((d-whole)*1000))
+          h=whole//3600; m=(whole%3600)//60; s=whole%60
+          stamp=f"{h:02}:{m:02}:{s:02},{ms:03}"
+          text="من فكرة بسيطة، نصنع مشهداً بصرياً بالذكاء الاصطناعي، ونحوّله إلى فيديو عربي يحمل هوية استوديو المساوى. نصنع هوية... تترك أثراً."
+          open("output/captions.srt","w",encoding="utf-8").write(f"1\n00:00:00,000 --> {stamp}\n{text}\n")
+          PY
+          ffmpeg -y -stream_loop -1 -i output/generated-scene.mp4 -i output/voice.mp3 -map 0:v:0 -map 1:a:0 -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 192k -shortest -movflags +faststart output/final.mp4
+      - name: Verify MP4 streams and dimensions
+        run: |
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,codec_type,width,height -of json output/final.mp4 | tee output/ffprobe.json
           python - <<'PY'
           import json
-          p=json.load(open("output/ffprobe.json", encoding="utf-8"))
-          assert p.get("streams"), "No media stream found"
-          assert any(s.get("codec_name") == "h264" for s in p["streams"]), "H.264 video stream not found"
-          assert float(p["format"]["duration"]) > 1, "Video duration is too short"
-          print("Verified: MP4 exists, contains H.264 video, and has a valid duration.")
+          p=json.load(open("output/ffprobe.json",encoding="utf-8")); ss=p["streams"]
+          assert any(s.get("codec_type")=="video" and s.get("codec_name")=="h264" for s in ss)
+          assert any(s.get("codec_type")=="audio" and s.get("codec_name")=="aac" for s in ss)
+          v=next(s for s in ss if s.get("codec_type")=="video")
+          assert (v["width"],v["height"])==(480,832), v
+          assert float(p["format"]["duration"])>3
+          print("PASS: portrait H.264 video, AAC Arabic narration, duration verified.")
           PY
-
-      - name: Upload generated video
+      - name: Upload video and evidence
         uses: actions/upload-artifact@v4
         with:
-          name: studio-almasawa-ai-video
+          name: studio-almasawa-video-2026-11-17
           path: |
             output/final.mp4
+            output/generated-scene.mp4
+            output/voice.mp3
+            output/narration.txt
+            output/captions.srt
             output/generation-report.json
             output/ffprobe.json
           if-no-files-found: error
